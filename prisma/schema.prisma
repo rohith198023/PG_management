@@ -1,0 +1,573 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+enum UserRole {
+  PLATFORM_SUPER_ADMIN
+  WORKSPACE_ADMIN
+  MANAGER
+  STAFF
+  TENANT
+}
+
+enum PropertyType {
+  HOSTEL
+  PG
+  APARTMENT
+  RENTAL
+  COLIVING
+}
+
+enum BedStatus {
+  VACANT
+  OCCUPIED
+  MAINTENANCE
+  RESERVED
+}
+
+enum LeaseStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  TERMINATED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING_VERIFICATION
+  PAID
+  REJECTED
+  FAILED
+}
+
+enum PaymentSource {
+  GATEWAY
+  MANUAL_UPLOAD
+  MANUAL_UPLOAD_VERIFIED
+  CASH
+  BANK_TRANSFER
+}
+
+enum MealSlotType {
+  BREAKFAST
+  LUNCH
+  DINNER
+  SNACKS
+}
+
+enum MealOption {
+  VEG
+  NON_VEG
+  SKIP
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum ComplaintPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+// -----------------------------------------------------------------------------
+// MULTI-TENANT WORKSPACE & USER AGGREGATES
+// -----------------------------------------------------------------------------
+
+model Workspace {
+  id              String        @id @default(uuid()) @db.Uuid
+  name            String
+  slug            String        @unique
+  logo_url        String?
+  gst_number      String?
+  phone           String
+  email           String
+  is_active       Boolean       @default(true)
+  
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  users           User[]
+  properties      Property[]
+  floors          Floor[]
+  rooms           Room[]
+  beds            Bed[]
+  tenants         TenantProfile[]
+  leases          Lease[]
+  invoices        Invoice[]
+  payments        Payment[]
+  payment_proofs  PaymentProof[]
+  meal_menus      MealMenu[]
+  meal_selections MealSelection[]
+  complaints      Complaint[]
+  audit_logs      AuditLog[]
+  gateway_configs GatewayConfig[]
+  ledger_accounts LedgerAccount[]
+  admission_invites AdmissionInvite[]
+
+  @@index([deleted_at])
+}
+
+model User {
+  id              String         @id @default(uuid()) @db.Uuid
+  workspace_id    String         @db.Uuid
+  email           String         @unique
+  password_hash   String
+  role            UserRole       @default(TENANT)
+  first_name      String
+  last_name       String
+  phone           String
+  avatar_url      String?
+  is_active       Boolean        @default(true)
+
+  created_at      DateTime       @default(now())
+  updated_at      DateTime       @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant_profile  TenantProfile?
+  audit_logs      AuditLog[]
+  reviewed_proofs PaymentProof[] @relation("ReviewedProofs")
+
+  @@index([workspace_id])
+  @@index([email])
+}
+
+// -----------------------------------------------------------------------------
+// PROPERTY & INVENTORY HIERARCHY
+// -----------------------------------------------------------------------------
+
+model Property {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  name            String
+  address         String
+  property_type   PropertyType  @default(PG)
+  amenities       String[]      @default([])
+  rules           String?
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  floors          Floor[]
+  rooms           Room[]
+  beds            Bed[]
+
+  @@index([workspace_id])
+}
+
+model Floor {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  property_id     String        @db.Uuid
+  floor_number    Int
+  name            String
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  property        Property      @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  rooms           Room[]
+
+  @@index([workspace_id])
+  @@index([property_id])
+}
+
+model Room {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  property_id     String        @db.Uuid
+  floor_id        String        @db.Uuid
+  room_number     String
+  capacity        Int
+  occupancy       Int           @default(0)
+  rent_amount     Decimal       @db.Decimal(10, 2)
+  deposit_amount  Decimal       @db.Decimal(10, 2)
+  amenities       String[]      @default([])
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  property        Property      @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  floor           Floor         @relation(fields: [floor_id], references: [id], onDelete: Cascade)
+  beds            Bed[]
+
+  @@index([workspace_id])
+  @@index([floor_id])
+}
+
+model Bed {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  property_id     String        @db.Uuid
+  room_id         String        @db.Uuid
+  bed_number      String
+  status          BedStatus     @default(VACANT)
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  property        Property      @relation(fields: [property_id], references: [id], onDelete: Cascade)
+  room            Room          @relation(fields: [room_id], references: [id], onDelete: Cascade)
+  tenants         TenantProfile[]
+  leases          Lease[]
+  admission_invites AdmissionInvite[]
+
+  @@index([workspace_id])
+  @@index([room_id])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// TENANCY & LEASE AGGREGATES
+// -----------------------------------------------------------------------------
+
+model TenantProfile {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  user_id         String        @unique @db.Uuid
+  bed_id          String?       @db.Uuid
+  emergency_contact String?
+  id_proof_type   String?
+  id_proof_number String?
+  id_proof_url    String?
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user            User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  bed             Bed?          @relation(fields: [bed_id], references: [id])
+  leases          Lease[]
+  invoices        Invoice[]
+  payments        Payment[]
+  meal_selections MealSelection[]
+  complaints      Complaint[]
+
+  @@index([workspace_id])
+  @@index([bed_id])
+}
+
+model Lease {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  tenant_id       String        @db.Uuid
+  bed_id          String        @db.Uuid
+  start_date      DateTime
+  end_date        DateTime?
+  rent_amount     Decimal       @db.Decimal(10, 2)
+  deposit_amount  Decimal       @db.Decimal(10, 2)
+  status          LeaseStatus   @default(ACTIVE)
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  bed             Bed           @relation(fields: [bed_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([tenant_id])
+}
+
+model AdmissionInvite {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  token           String        @unique
+  email           String
+  first_name      String
+  last_name       String
+  phone           String
+  bed_id          String        @db.Uuid
+  rent_amount     Decimal       @db.Decimal(10, 2)
+  deposit_amount  Decimal       @db.Decimal(10, 2)
+  expires_at      DateTime
+  is_used         Boolean       @default(false)
+  created_at      DateTime      @default(now())
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  bed             Bed           @relation(fields: [bed_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([token])
+}
+
+// -----------------------------------------------------------------------------
+// MEAL / MESS MANAGEMENT MODULE
+// -----------------------------------------------------------------------------
+
+model MealMenu {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  date            DateTime      @db.Date
+  slot            MealSlotType
+  title           String
+  description     String?
+  veg_available   Boolean       @default(true)
+  non_veg_available Boolean     @default(false)
+  veg_price       Decimal       @default(0) @db.Decimal(10, 2)
+  non_veg_price   Decimal       @default(0) @db.Decimal(10, 2)
+  cutoff_time     DateTime
+  is_canceled     Boolean       @default(false)
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  selections      MealSelection[]
+
+  @@unique([workspace_id, date, slot])
+  @@index([workspace_id])
+  @@index([date])
+}
+
+model MealSelection {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  menu_id         String        @db.Uuid
+  tenant_id       String        @db.Uuid
+  choice          MealOption    @default(SKIP)
+  charged_amount  Decimal       @default(0) @db.Decimal(10, 2)
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  menu            MealMenu      @relation(fields: [menu_id], references: [id], onDelete: Cascade)
+  tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([menu_id, tenant_id])
+  @@index([workspace_id])
+  @@index([tenant_id])
+}
+
+// -----------------------------------------------------------------------------
+// FINANCIAL & BYO-PAYMENT GATEWAY AGGREGATES
+// -----------------------------------------------------------------------------
+
+model GatewayConfig {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  gateway_name    String        // razorpay | cashfree | phonepe | stripe
+  is_active       Boolean       @default(false)
+  api_key         String
+  api_secret_enc  String        // AES-256-GCM encrypted secret
+  webhook_secret_enc String?    // Encrypted webhook secret
+  merchant_id     String?
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+
+  @@unique([workspace_id, gateway_name])
+  @@index([workspace_id])
+}
+
+model Invoice {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  tenant_id       String        @db.Uuid
+  invoice_number  String        @unique
+  issue_date      DateTime      @default(now())
+  due_date        DateTime
+  subtotal        Decimal       @db.Decimal(10, 2)
+  tax_amount      Decimal       @default(0) @db.Decimal(10, 2)
+  total_amount    Decimal       @db.Decimal(10, 2)
+  amount_paid     Decimal       @default(0) @db.Decimal(10, 2)
+  status          InvoiceStatus @default(ISSUED)
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  line_items      InvoiceLineItem[]
+  payments        Payment[]
+
+  @@index([workspace_id])
+  @@index([tenant_id])
+  @@index([status])
+}
+
+model InvoiceLineItem {
+  id              String        @id @default(uuid()) @db.Uuid
+  invoice_id      String        @db.Uuid
+  description     String
+  quantity        Int           @default(1)
+  unit_price      Decimal       @db.Decimal(10, 2)
+  amount          Decimal       @db.Decimal(10, 2)
+
+  invoice         Invoice       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([invoice_id])
+}
+
+model Payment {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  tenant_id       String        @db.Uuid
+  invoice_id      String        @db.Uuid
+  amount          Decimal       @db.Decimal(10, 2)
+  payment_date    DateTime      @default(now())
+  source          PaymentSource
+  status          PaymentStatus @default(PENDING_VERIFICATION)
+  transaction_ref String?       @unique
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  invoice         Invoice       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  proof           PaymentProof?
+
+  @@index([workspace_id])
+  @@index([tenant_id])
+  @@index([invoice_id])
+  @@index([status])
+}
+
+model PaymentProof {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  payment_id      String        @unique @db.Uuid
+  proof_image_url String
+  utr_number      String?
+  notes           String?
+  reviewed_by_id  String?       @db.Uuid
+  reviewed_at     DateTime?
+  rejection_reason String?
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payment         Payment       @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  reviewed_by     User?         @relation("ReviewedProofs", fields: [reviewed_by_id], references: [id])
+
+  @@index([workspace_id])
+}
+
+// -----------------------------------------------------------------------------
+// GENERAL LEDGER ARCHITECTURE
+// -----------------------------------------------------------------------------
+
+model LedgerAccount {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  code            String
+  name            String
+  type            AccountType
+
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  journal_entries LedgerJournalEntry[]
+
+  @@unique([workspace_id, code])
+  @@index([workspace_id])
+}
+
+model LedgerJournalEntry {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  account_id      String        @db.Uuid
+  reference_id    String?       // ID of Invoice or Payment
+  debit_amount    Decimal       @default(0) @db.Decimal(10, 2)
+  credit_amount   Decimal       @default(0) @db.Decimal(10, 2)
+  description     String
+  posted_at       DateTime      @default(now())
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  account         LedgerAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([account_id])
+}
+
+// -----------------------------------------------------------------------------
+// OPERATIONS & AUDIT TRAIL
+// -----------------------------------------------------------------------------
+
+model Complaint {
+  id              String            @id @default(uuid()) @db.Uuid
+  workspace_id    String            @db.Uuid
+  tenant_id       String            @db.Uuid
+  title           String
+  description     String
+  category        String
+  priority        ComplaintPriority @default(MEDIUM)
+  status          ComplaintStatus   @default(OPEN)
+
+  created_at      DateTime          @default(now())
+  updated_at      DateTime          @updatedAt
+  deleted_at      DateTime?
+
+  workspace       Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant          TenantProfile     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([tenant_id])
+}
+
+model AuditLog {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspace_id    String        @db.Uuid
+  user_id         String?       @db.Uuid
+  action          String
+  entity          String
+  entity_id       String?
+  ip_address      String?
+  details         Json?
+  created_at      DateTime      @default(now())
+
+  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user            User?         @relation(fields: [user_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([created_at])
+}
