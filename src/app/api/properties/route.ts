@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { PropertyType } from '@prisma/client'
+import { resolveWorkspaceContext } from '@/lib/workspace-context'
 import { z } from 'zod'
 
 const propertySchema = z.object({
@@ -16,14 +17,14 @@ const propertySchema = z.object({
 })
 
 export async function GET(request: Request) {
-  const workspaceId = request.headers.get('x-workspace-id')
-  if (!workspaceId) {
+  const ctx = await resolveWorkspaceContext(request)
+  if (!ctx.workspaceId) {
     return NextResponse.json({ error: 'Unauthorized: Missing workspace_id' }, { status: 401 })
   }
 
   const properties = await prisma.property.findMany({
     where: {
-      workspace_id: workspaceId,
+      workspace_id: ctx.workspaceId,
       deleted_at: null,
     },
     include: {
@@ -44,13 +45,13 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const workspaceId = request.headers.get('x-workspace-id')
-  const role = request.headers.get('x-user-role')
+  const ctx = await resolveWorkspaceContext(request)
 
-  if (!workspaceId) {
+  if (!ctx.workspaceId) {
     return NextResponse.json({ error: 'Unauthorized: Missing workspace_id' }, { status: 401 })
   }
 
+  const role = ctx.role
   if (role !== 'WORKSPACE_ADMIN' && role !== 'PLATFORM_SUPER_ADMIN') {
     return NextResponse.json({ error: 'Forbidden: Insufficient permissions to create property' }, { status: 403 })
   }
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
       // 1. Create Property
       const newProperty = await tx.property.create({
         data: {
-          workspace_id: workspaceId,
+          workspace_id: ctx.workspaceId!,
           name: validated.name,
           address: validated.address,
           property_type: validated.propertyType,
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
       for (let f = 1; f <= validated.floorsCount; f++) {
         const floor = await tx.floor.create({
           data: {
-            workspace_id: workspaceId,
+            workspace_id: ctx.workspaceId!,
             property_id: newProperty.id,
             floor_number: f,
             name: `Floor ${f}`,
@@ -86,7 +87,7 @@ export async function POST(request: Request) {
           const roomNumber = `${f}0${r}`
           const room = await tx.room.create({
             data: {
-              workspace_id: workspaceId,
+              workspace_id: ctx.workspaceId!,
               property_id: newProperty.id,
               floor_id: floor.id,
               room_number: roomNumber,
@@ -100,10 +101,10 @@ export async function POST(request: Request) {
           for (let b = 1; b <= validated.bedsPerRoom; b++) {
             await tx.bed.create({
               data: {
-                workspace_id: workspaceId,
+                workspace_id: ctx.workspaceId!,
                 property_id: newProperty.id,
                 room_id: room.id,
-                bed_number: `${roomNumber}-${String.fromCharCode(64 + b)}`, // 101-A, 101-B
+                bed_number: `${roomNumber}-${String.fromCharCode(64 + b)}`,
                 status: 'VACANT',
               },
             })
@@ -120,6 +121,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
     }
     console.error('Property creation error:', error)
-    return NextResponse.json({ error: 'Failed to create property' }, { status: 500 })
+    return NextResponse.json({ error: error.message || 'Failed to create property' }, { status: 500 })
   }
 }

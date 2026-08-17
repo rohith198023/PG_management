@@ -1,6 +1,7 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 generator client {
@@ -78,6 +79,39 @@ enum MealOption {
   SKIP
 }
 
+enum MealBillingType {
+  INCLUDED_IN_RENT
+  CHARGED_PER_MEAL
+  MONTHLY_MEAL_PLAN
+  OPTIONAL_ADDON
+}
+
+enum CancelReason {
+  KITCHEN_UNAVAILABLE
+  HOLIDAY
+  MAINTENANCE
+  EMERGENCY
+  OTHER
+}
+
+enum FoodCategory {
+  MAIN_ITEM
+  SIDE_DISH
+  BEVERAGE
+  DESSERT
+  ADDON
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
 enum ComplaintStatus {
   OPEN
   IN_PROGRESS
@@ -92,12 +126,93 @@ enum ComplaintPriority {
   URGENT
 }
 
+enum ComplaintCategory {
+  PLUMBING
+  ELECTRICAL
+  CARPENTRY
+  CLEANING
+  INTERNET
+  APPLIANCE
+  SECURITY
+  OTHER
+}
+
 enum AccountType {
   ASSET
   LIABILITY
   EQUITY
   REVENUE
   EXPENSE
+}
+
+enum GatewayStatus {
+  DRAFT
+  TESTING
+  VERIFICATION
+  CONNECTED
+  DISABLED
+  FAILED
+  REVOKED
+  EXPIRED_CREDENTIALS
+}
+
+enum IntentStatus {
+  CREATED
+  PROCESSING
+  REQUIRES_ACTION
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum WebhookEventStatus {
+  PENDING
+  PROCESSED
+  FAILED
+  DUPLICATE
+  DEAD_LETTER
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  REJECTED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  WON
+  LOST
+}
+
+enum MandateStatus {
+  ACTIVE
+  PAUSED
+  REVOKED
+  EXPIRED
+}
+
+enum SettlementStatus {
+  PENDING
+  SETTLED
+  FAILED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum BankAccountType {
+  RENT_COLLECTION
+  SECURITY_DEPOSIT
+  UTILITIES
+  GENERAL_CASH
 }
 
 // -----------------------------------------------------------------------------
@@ -128,13 +243,37 @@ model Workspace {
   invoices        Invoice[]
   payments        Payment[]
   payment_proofs  PaymentProof[]
-  meal_menus      MealMenu[]
-  meal_selections MealSelection[]
+  meal_billing_configs  MealBillingConfig[]
+  meal_weekly_templates MealWeeklyTemplate[]
+  meal_weekly_template_items MealWeeklyTemplateItem[]
+  meal_menus            MealMenu[]
+  meal_menu_items       MealMenuItem[]
+  meal_selections       MealSelection[]
+  meal_audit_logs       MealAuditLog[]
+  meal_event_logs       MealEventLog[]
   complaints      Complaint[]
+  complaint_activities ComplaintActivity[]
   audit_logs      AuditLog[]
   gateway_configs GatewayConfig[]
   ledger_accounts LedgerAccount[]
+  ledger_journal_entries LedgerJournalEntry[]
   admission_invites AdmissionInvite[]
+
+  bank_accounts         BankAccount[]
+  financial_settings    FinancialSettings?
+  resident_wallets      ResidentWallet[]
+  payment_intents       PaymentIntent[]
+  webhook_events        WebhookEvent[]
+  payment_refunds       PaymentRefund[]
+  chargeback_disputes   ChargebackDispute[]
+  subscription_mandates SubscriptionMandate[]
+  bank_settlements      BankSettlement[]
+  payment_receipts      PaymentReceipt[]
+  payment_audits        PaymentAudit[]
+  gateway_healths       GatewayHealth[]
+  failover_logs         GatewayFailoverLog[]
+  queue_monitor_logs    QueueMonitorLog[]
+  expenses              Expense[]
 
   @@index([deleted_at])
 }
@@ -156,9 +295,15 @@ model User {
   deleted_at      DateTime?
 
   workspace       Workspace      @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  tenant_profile  TenantProfile?
-  audit_logs      AuditLog[]
-  reviewed_proofs PaymentProof[] @relation("ReviewedProofs")
+  tenant_profile    TenantProfile?
+  audit_logs        AuditLog[]
+  reviewed_proofs   PaymentProof[] @relation("ReviewedProofs")
+  created_expenses  Expense[]      @relation("ExpenseCreator")
+  approved_expenses Expense[]      @relation("ExpenseApprover")
+  published_meal_menus MealMenu[]
+  meal_audit_logs   MealAuditLog[]
+  assigned_complaints  Complaint[]         @relation("AssignedStaffComplaints")
+  complaint_activities ComplaintActivity[]
 
   @@index([workspace_id])
   @@index([email])
@@ -283,6 +428,9 @@ model TenantProfile {
   payments        Payment[]
   meal_selections MealSelection[]
   complaints      Complaint[]
+  wallet          ResidentWallet?
+  payment_intents PaymentIntent[]
+  subscription_mandates SubscriptionMandate[]
 
   @@index([workspace_id])
   @@index([bed_id])
@@ -333,73 +481,30 @@ model AdmissionInvite {
   @@index([token])
 }
 
-// -----------------------------------------------------------------------------
-// MEAL / MESS MANAGEMENT MODULE
-// -----------------------------------------------------------------------------
 
-model MealMenu {
-  id              String        @id @default(uuid()) @db.Uuid
-  workspace_id    String        @db.Uuid
-  date            DateTime      @db.Date
-  slot            MealSlotType
-  title           String
-  description     String?
-  veg_available   Boolean       @default(true)
-  non_veg_available Boolean     @default(false)
-  veg_price       Decimal       @default(0) @db.Decimal(10, 2)
-  non_veg_price   Decimal       @default(0) @db.Decimal(10, 2)
-  cutoff_time     DateTime
-  is_canceled     Boolean       @default(false)
-
-  created_at      DateTime      @default(now())
-  updated_at      DateTime      @updatedAt
-
-  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  selections      MealSelection[]
-
-  @@unique([workspace_id, date, slot])
-  @@index([workspace_id])
-  @@index([date])
-}
-
-model MealSelection {
-  id              String        @id @default(uuid()) @db.Uuid
-  workspace_id    String        @db.Uuid
-  menu_id         String        @db.Uuid
-  tenant_id       String        @db.Uuid
-  choice          MealOption    @default(SKIP)
-  charged_amount  Decimal       @default(0) @db.Decimal(10, 2)
-
-  created_at      DateTime      @default(now())
-  updated_at      DateTime      @updatedAt
-
-  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  menu            MealMenu      @relation(fields: [menu_id], references: [id], onDelete: Cascade)
-  tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
-
-  @@unique([menu_id, tenant_id])
-  @@index([workspace_id])
-  @@index([tenant_id])
-}
 
 // -----------------------------------------------------------------------------
 // FINANCIAL & BYO-PAYMENT GATEWAY AGGREGATES
 // -----------------------------------------------------------------------------
 
 model GatewayConfig {
-  id              String        @id @default(uuid()) @db.Uuid
-  workspace_id    String        @db.Uuid
-  gateway_name    String        // razorpay | cashfree | phonepe | stripe
-  is_active       Boolean       @default(false)
-  api_key         String
-  api_secret_enc  String        // AES-256-GCM encrypted secret
-  webhook_secret_enc String?    // Encrypted webhook secret
-  merchant_id     String?
+  id                 String        @id @default(uuid()) @db.Uuid
+  workspace_id       String        @db.Uuid
+  gateway_name       String        // razorpay | cashfree | phonepe | stripe
+  is_active          Boolean       @default(false)
+  status             GatewayStatus @default(DRAFT)
+  api_key            String
+  api_secret_enc     String        // AES-256-GCM encrypted secret
+  webhook_secret_enc String?       // Encrypted webhook secret
+  merchant_id        String?
+  key_mask           String?
+  secret_mask        String?
+  last_verified_at   DateTime?
 
-  created_at      DateTime      @default(now())
-  updated_at      DateTime      @updatedAt
+  created_at         DateTime      @default(now())
+  updated_at         DateTime      @updatedAt
 
-  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  workspace          Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@unique([workspace_id, gateway_name])
   @@index([workspace_id])
@@ -426,6 +531,7 @@ model Invoice {
   tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   line_items      InvoiceLineItem[]
   payments        Payment[]
+  payment_intents PaymentIntent[]
 
   @@index([workspace_id])
   @@index([tenant_id])
@@ -450,11 +556,14 @@ model Payment {
   workspace_id    String        @db.Uuid
   tenant_id       String        @db.Uuid
   invoice_id      String        @db.Uuid
+  bank_account_id String?       @db.Uuid
   amount          Decimal       @db.Decimal(10, 2)
   payment_date    DateTime      @default(now())
   source          PaymentSource
   status          PaymentStatus @default(PENDING_VERIFICATION)
   transaction_ref String?       @unique
+  idempotency_key String?       @unique
+  auto_reconciled Boolean       @default(false)
 
   created_at      DateTime      @default(now())
   updated_at      DateTime      @updatedAt
@@ -462,7 +571,12 @@ model Payment {
   workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
   tenant          TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
   invoice         Invoice       @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+  bank_account    BankAccount?  @relation(fields: [bank_account_id], references: [id])
   proof           PaymentProof?
+  receipt         PaymentReceipt?
+  refunds         PaymentRefund[]
+  disputes        ChargebackDispute[]
+  audits          PaymentAudit[]
 
   @@index([workspace_id])
   @@index([tenant_id])
@@ -471,22 +585,352 @@ model Payment {
 }
 
 model PaymentProof {
-  id              String        @id @default(uuid()) @db.Uuid
-  workspace_id    String        @db.Uuid
-  payment_id      String        @unique @db.Uuid
-  proof_image_url String
-  utr_number      String?
-  notes           String?
-  reviewed_by_id  String?       @db.Uuid
-  reviewed_at     DateTime?
+  id               String        @id @default(uuid()) @db.Uuid
+  workspace_id     String        @db.Uuid
+  payment_id       String        @unique @db.Uuid
+  proof_image_url  String
+  utr_number       String?
+  notes            String?
+  reviewed_by_id   String?       @db.Uuid
+  reviewed_at      DateTime?
   rejection_reason String?
 
-  created_at      DateTime      @default(now())
-  updated_at      DateTime      @updatedAt
+  created_at       DateTime      @default(now())
+  updated_at       DateTime      @updatedAt
 
-  workspace       Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  payment         Payment       @relation(fields: [payment_id], references: [id], onDelete: Cascade)
-  reviewed_by     User?         @relation("ReviewedProofs", fields: [reviewed_by_id], references: [id])
+  workspace        Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payment          Payment       @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  reviewed_by      User?         @relation("ReviewedProofs", fields: [reviewed_by_id], references: [id])
+  ocr_result       OCRResult?
+  fraud_check      FraudCheck?
+
+  @@index([workspace_id])
+  @@index([utr_number])
+}
+
+// -----------------------------------------------------------------------------
+// ADVANCED ENTERPRISE FINANCE MODELS
+// -----------------------------------------------------------------------------
+
+model BankAccount {
+  id             String          @id @default(uuid()) @db.Uuid
+  workspace_id   String          @db.Uuid
+  bank_name      String
+  account_number String
+  ifsc_code      String
+  account_type   BankAccountType @default(RENT_COLLECTION)
+  is_default     Boolean         @default(false)
+  balance        Decimal         @default(0) @db.Decimal(12, 2)
+
+  created_at     DateTime        @default(now())
+  updated_at     DateTime        @updatedAt
+
+  workspace      Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payments       Payment[]
+  settlements    BankSettlement[]
+  expenses       Expense[]
+
+  @@index([workspace_id])
+}
+
+model FinancialSettings {
+  id                    String    @id @default(uuid()) @db.Uuid
+  workspace_id          String    @unique @db.Uuid
+  invoice_prefix        String    @default("INV")
+  due_days              Int       @default(7)
+  tax_gst_number        String?
+  cgst_rate             Decimal   @default(0) @db.Decimal(5, 2)
+  sgst_rate             Decimal   @default(0) @db.Decimal(5, 2)
+  igst_rate             Decimal   @default(0) @db.Decimal(5, 2)
+  late_fee_per_day      Decimal   @default(0) @db.Decimal(10, 2)
+  deposit_lock_in_months Int      @default(6)
+  auto_reconcile_enabled Boolean  @default(true)
+  failover_enabled      Boolean   @default(true)
+  fiscal_year_start     String    @default("04-01")
+
+  created_at            DateTime  @default(now())
+  updated_at            DateTime  @updatedAt
+
+  workspace             Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+}
+
+model ResidentWallet {
+  id           String              @id @default(uuid()) @db.Uuid
+  workspace_id String              @db.Uuid
+  tenant_id    String              @unique @db.Uuid
+  balance      Decimal             @default(0) @db.Decimal(10, 2)
+
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
+
+  workspace    Workspace           @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant       TenantProfile       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@index([workspace_id])
+}
+
+model WalletTransaction {
+  id             String         @id @default(uuid()) @db.Uuid
+  workspace_id   String         @db.Uuid
+  wallet_id      String         @db.Uuid
+  amount         Decimal        @db.Decimal(10, 2)
+  type           String         // CREDIT | DEBIT
+  reference_id   String?
+  description    String
+
+  created_at     DateTime       @default(now())
+
+  wallet         ResidentWallet @relation(fields: [wallet_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([wallet_id])
+}
+
+model PaymentIntent {
+  id               String       @id @default(uuid()) @db.Uuid
+  workspace_id     String       @db.Uuid
+  tenant_id        String       @db.Uuid
+  invoice_id       String       @db.Uuid
+  amount           Decimal      @db.Decimal(10, 2)
+  currency         String       @default("INR")
+  idempotency_key  String       @unique
+  gateway_name     String
+  gateway_order_id String?
+  status           IntentStatus @default(CREATED)
+  expires_at       DateTime
+
+  created_at       DateTime     @default(now())
+  updated_at       DateTime     @updatedAt
+
+  workspace        Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant           TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  invoice          Invoice      @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([invoice_id])
+}
+
+model WebhookEvent {
+  id                 String             @id @default(uuid()) @db.Uuid
+  workspace_id       String             @db.Uuid
+  gateway_name       String
+  event_id           String
+  event_type         String
+  payload_hash       String
+  signature          String
+  status             WebhookEventStatus @default(PENDING)
+  retry_count        Int                @default(0)
+  correlation_id     String
+  processing_time_ms Int?
+  error_message      String?
+  raw_payload        Json
+
+  created_at         DateTime           @default(now())
+
+  workspace          Workspace          @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+
+  @@unique([workspace_id, event_id])
+  @@index([workspace_id])
+  @@index([status])
+}
+
+model OCRResult {
+  id                 String       @id @default(uuid()) @db.Uuid
+  proof_id           String       @unique @db.Uuid
+  utr_number         String?
+  amount             Decimal?     @db.Decimal(10, 2)
+  payment_date       String?
+  merchant_vpa       String?
+  overall_confidence Float        @default(0.0)
+  utr_matched        Boolean      @default(false)
+  amount_matched     Boolean      @default(false)
+  merchant_matched   Boolean      @default(false)
+  raw_text           String?
+
+  created_at         DateTime     @default(now())
+
+  proof              PaymentProof @relation(fields: [proof_id], references: [id], onDelete: Cascade)
+}
+
+model FraudCheck {
+  id                  String       @id @default(uuid()) @db.Uuid
+  proof_id            String       @unique @db.Uuid
+  risk_level          RiskLevel    @default(LOW)
+  risk_score          Int          @default(10)
+  flags               Json         // Array of flag strings
+  utr_duplicate_count Int          @default(0)
+  is_flagged          Boolean      @default(false)
+
+  created_at          DateTime     @default(now())
+
+  proof               PaymentProof @relation(fields: [proof_id], references: [id], onDelete: Cascade)
+}
+
+model PaymentRefund {
+  id                String       @id @default(uuid()) @db.Uuid
+  workspace_id      String       @db.Uuid
+  payment_id        String       @db.Uuid
+  amount            Decimal      @db.Decimal(10, 2)
+  reason            String
+  status            RefundStatus @default(REQUESTED)
+  gateway_refund_id String?
+  requested_by_id   String       @db.Uuid
+  reviewed_by_id    String?      @db.Uuid
+
+  created_at        DateTime     @default(now())
+  updated_at        DateTime     @updatedAt
+
+  workspace         Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payment           Payment      @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([payment_id])
+}
+
+model ChargebackDispute {
+  id           String        @id @default(uuid()) @db.Uuid
+  workspace_id String        @db.Uuid
+  payment_id   String        @db.Uuid
+  amount       Decimal       @db.Decimal(10, 2)
+  evidence_url String?
+  status       DisputeStatus @default(OPEN)
+  due_date     DateTime
+
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+
+  workspace    Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payment      Payment       @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([payment_id])
+}
+
+model SubscriptionMandate {
+  id                 String        @id @default(uuid()) @db.Uuid
+  workspace_id       String        @db.Uuid
+  tenant_id          String        @db.Uuid
+  mandate_type       String        // UPI_AUTOPAY | CARD_MANDATE | EMANDATE
+  gateway_mandate_id String        @unique
+  max_amount         Decimal       @db.Decimal(10, 2)
+  billing_day        Int           @default(5)
+  status             MandateStatus @default(ACTIVE)
+
+  created_at         DateTime      @default(now())
+
+  workspace          Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant             TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([tenant_id])
+}
+
+model BankSettlement {
+  id              String           @id @default(uuid()) @db.Uuid
+  workspace_id    String           @db.Uuid
+  gateway_name    String
+  settlement_id   String           @unique
+  gross_amount    Decimal          @db.Decimal(10, 2)
+  fee_amount      Decimal          @db.Decimal(10, 2)
+  tax_amount      Decimal          @db.Decimal(10, 2)
+  net_amount      Decimal          @db.Decimal(10, 2)
+  bank_account_id String?          @db.Uuid
+  status          SettlementStatus @default(SETTLED)
+  settled_at      DateTime         @default(now())
+
+  created_at      DateTime         @default(now())
+
+  workspace       Workspace        @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  bank_account    BankAccount?     @relation(fields: [bank_account_id], references: [id])
+
+  @@index([workspace_id])
+}
+
+model PaymentReceipt {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspace_id   String    @db.Uuid
+  payment_id     String    @unique @db.Uuid
+  receipt_number String    @unique
+  issued_at      DateTime  @default(now())
+  pdf_url        String?
+
+  created_at     DateTime  @default(now())
+
+  workspace      Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payment        Payment   @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+}
+
+model PaymentAudit {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspace_id   String    @db.Uuid
+  payment_id     String?   @db.Uuid
+  user_id        String?   @db.Uuid
+  action         String
+  old_values     Json?
+  new_values     Json?
+  ip_address     String?
+  user_agent     String?
+  correlation_id String
+
+  created_at     DateTime  @default(now())
+
+  workspace      Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  payment        Payment?  @relation(fields: [payment_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([correlation_id])
+}
+
+model GatewayHealth {
+  id                   String        @id @default(uuid()) @db.Uuid
+  workspace_id         String        @db.Uuid
+  gateway_name         String
+  status               GatewayStatus @default(CONNECTED)
+  avg_latency_ms       Int           @default(250)
+  success_rate         Float         @default(99.9)
+  failed_requests_count Int          @default(0)
+  webhook_health       String        @default("HEALTHY")
+  certificate_status   String        @default("VALID")
+  last_sync_at         DateTime      @default(now())
+
+  created_at           DateTime      @default(now())
+  updated_at           DateTime      @updatedAt
+
+  workspace            Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+
+  @@unique([workspace_id, gateway_name])
+  @@index([workspace_id])
+}
+
+model GatewayFailoverLog {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspace_id     String    @db.Uuid
+  primary_gateway  String
+  fallback_gateway String
+  reason           String
+  latency_ms       Int
+
+  created_at       DateTime  @default(now())
+
+  workspace        Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+}
+
+model QueueMonitorLog {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspace_id       String    @db.Uuid
+  queue_name         String    // webhook | payment | notification | dead_letter | ocr
+  pending_jobs       Int       @default(0)
+  failed_jobs        Int       @default(0)
+  processed_24h      Int       @default(0)
+
+  created_at         DateTime  @default(now())
+
+  workspace          Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
 
   @@index([workspace_id])
 }
@@ -534,24 +978,56 @@ model LedgerJournalEntry {
 // -----------------------------------------------------------------------------
 
 model Complaint {
-  id              String            @id @default(uuid()) @db.Uuid
-  workspace_id    String            @db.Uuid
-  tenant_id       String            @db.Uuid
-  title           String
-  description     String
-  category        String
-  priority        ComplaintPriority @default(MEDIUM)
-  status          ComplaintStatus   @default(OPEN)
+  id                String            @id @default(uuid()) @db.Uuid
+  workspace_id      String            @db.Uuid
+  tenant_id         String            @db.Uuid
+  assigned_staff_id String?           @db.Uuid
+  title             String
+  description       String
+  category          ComplaintCategory @default(OTHER)
+  priority          ComplaintPriority @default(MEDIUM)
+  status            ComplaintStatus   @default(OPEN)
+  attachment_url    String?
+  sla_due_at        DateTime?
+  resolved_at       DateTime?
+  resolution_notes  String?
+  rating            Int?
+  feedback          String?
 
-  created_at      DateTime          @default(now())
-  updated_at      DateTime          @updatedAt
-  deleted_at      DateTime?
+  created_at        DateTime          @default(now())
+  updated_at        DateTime          @updatedAt
+  deleted_at        DateTime?
 
-  workspace       Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
-  tenant          TenantProfile     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  workspace         Workspace         @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  tenant            TenantProfile     @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  assigned_staff    User?             @relation("AssignedStaffComplaints", fields: [assigned_staff_id], references: [id])
+  activities        ComplaintActivity[]
 
   @@index([workspace_id])
   @@index([tenant_id])
+  @@index([assigned_staff_id])
+  @@index([status])
+  @@index([priority])
+}
+
+model ComplaintActivity {
+  id           String           @id @default(uuid()) @db.Uuid
+  workspace_id String           @db.Uuid
+  complaint_id String           @db.Uuid
+  user_id      String?          @db.Uuid
+  action       String
+  old_status   ComplaintStatus?
+  new_status   ComplaintStatus?
+  notes        String?
+
+  created_at   DateTime         @default(now())
+
+  workspace    Workspace        @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  complaint    Complaint        @relation(fields: [complaint_id], references: [id], onDelete: Cascade)
+  user         User?            @relation(fields: [user_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([complaint_id])
 }
 
 model AuditLog {
@@ -571,3 +1047,223 @@ model AuditLog {
   @@index([workspace_id])
   @@index([created_at])
 }
+
+// -----------------------------------------------------------------------------
+// EXPENSE MANAGEMENT & PHASE 5 FINANCIAL REPORTING
+// -----------------------------------------------------------------------------
+
+enum ExpenseCategory {
+  UTILITIES
+  MAINTENANCE
+  SALARY
+  INTERNET
+  TAX
+  GATEWAY_FEE
+  REFUND
+  SUPPLIES
+  FOOD_MESS
+  OTHER
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+model Expense {
+  id               String          @id @default(uuid()) @db.Uuid
+  workspace_id     String          @db.Uuid
+  category         ExpenseCategory @default(OTHER)
+  title            String
+  amount           Decimal         @db.Decimal(10, 2)
+  tax_amount       Decimal         @default(0) @db.Decimal(10, 2)
+  vendor_name      String?
+  payment_method   String          @default("BANK_TRANSFER") // CASH, BANK_TRANSFER, UPI, CARD
+  receipt_url      String?
+  status           ExpenseStatus   @default(PENDING)
+  notes            String?
+
+  created_by_id    String?         @db.Uuid
+  approved_by_id   String?         @db.Uuid
+  bank_account_id  String?         @db.Uuid
+
+  expense_date     DateTime        @default(now())
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
+
+  workspace        Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  created_by       User?           @relation("ExpenseCreator", fields: [created_by_id], references: [id])
+  approved_by      User?           @relation("ExpenseApprover", fields: [approved_by_id], references: [id])
+  bank_account     BankAccount?    @relation(fields: [bank_account_id], references: [id])
+
+  @@index([workspace_id])
+  @@index([category])
+  @@index([status])
+}
+
+// -----------------------------------------------------------------------------
+// PHASE 6: DYNAMIC MESS MANAGEMENT & KITCHEN LOGISTICS
+// -----------------------------------------------------------------------------
+
+model MealBillingConfig {
+  id                    String          @id @default(uuid()) @db.Uuid
+  workspace_id          String          @unique @db.Uuid
+  billing_type          MealBillingType @default(INCLUDED_IN_RENT)
+  monthly_plan_price    Decimal         @default(3500) @db.Decimal(10, 2)
+  default_veg_price     Decimal         @default(60) @db.Decimal(10, 2)
+  default_non_veg_price Decimal         @default(90) @db.Decimal(10, 2)
+  currency              String          @default("INR")
+  timezone              String          @default("Asia/Kolkata")
+
+  created_at            DateTime        @default(now())
+  updated_at            DateTime        @updatedAt
+
+  workspace             Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+}
+
+model MealWeeklyTemplate {
+  id           String                   @id @default(uuid()) @db.Uuid
+  workspace_id String                   @db.Uuid
+  name         String                   @default("Standard Weekly Menu")
+  is_active    Boolean                  @default(true)
+
+  created_at   DateTime                 @default(now())
+  updated_at   DateTime                 @updatedAt
+
+  workspace    Workspace                @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  items        MealWeeklyTemplateItem[]
+
+  @@index([workspace_id])
+}
+
+model MealWeeklyTemplateItem {
+  id                String             @id @default(uuid()) @db.Uuid
+  workspace_id      String             @db.Uuid
+  template_id       String             @db.Uuid
+  day_of_week       DayOfWeek
+  slot              MealSlotType
+  title             String
+  description       String?
+  veg_available     Boolean            @default(true)
+  non_veg_available Boolean            @default(false)
+  veg_price         Decimal            @default(60) @db.Decimal(10, 2)
+  non_veg_price     Decimal            @default(90) @db.Decimal(10, 2)
+  is_special        Boolean            @default(false)
+  special_tag       String?
+  items_json        Json?
+
+  created_at        DateTime           @default(now())
+  updated_at        DateTime           @updatedAt
+
+  workspace         Workspace          @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  template          MealWeeklyTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@unique([template_id, day_of_week, slot])
+  @@index([workspace_id])
+}
+
+model MealMenu {
+  id                String          @id @default(uuid()) @db.Uuid
+  workspace_id      String          @db.Uuid
+  date              DateTime        @db.Date
+  slot              MealSlotType
+  title             String
+  description       String?
+  is_special        Boolean         @default(false)
+  special_tag       String?
+  veg_available     Boolean         @default(true)
+  non_veg_available Boolean         @default(false)
+  veg_price         Decimal         @default(60) @db.Decimal(10, 2)
+  non_veg_price     Decimal         @default(90) @db.Decimal(10, 2)
+  cutoff_time       DateTime
+  is_canceled       Boolean         @default(false)
+  cancel_reason     CancelReason?
+  cancel_note       String?
+  published_by_id   String?         @db.Uuid
+
+  created_at        DateTime        @default(now())
+  updated_at        DateTime        @updatedAt
+
+  workspace         Workspace       @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  published_by      User?           @relation(fields: [published_by_id], references: [id])
+  items             MealMenuItem[]
+  selections        MealSelection[]
+
+  @@unique([workspace_id, date, slot])
+  @@index([workspace_id])
+  @@index([date])
+}
+
+model MealMenuItem {
+  id           String       @id @default(uuid()) @db.Uuid
+  workspace_id String       @db.Uuid
+  menu_id      String       @db.Uuid
+  category     FoodCategory @default(MAIN_ITEM)
+  name         String
+  is_veg       Boolean      @default(true)
+
+  created_at   DateTime     @default(now())
+
+  workspace    Workspace    @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  menu         MealMenu     @relation(fields: [menu_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([menu_id])
+}
+
+model MealSelection {
+  id             String        @id @default(uuid()) @db.Uuid
+  workspace_id   String        @db.Uuid
+  menu_id        String        @db.Uuid
+  tenant_id      String        @db.Uuid
+  choice         MealOption    @default(VEG)
+  charged_amount Decimal       @default(0) @db.Decimal(10, 2)
+  is_billed      Boolean       @default(false)
+  billed_at      DateTime?
+
+  created_at     DateTime      @default(now())
+  updated_at     DateTime      @updatedAt
+
+  workspace      Workspace     @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  menu           MealMenu      @relation(fields: [menu_id], references: [id], onDelete: Cascade)
+  tenant         TenantProfile @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([menu_id, tenant_id])
+  @@index([workspace_id])
+  @@index([tenant_id])
+}
+
+model MealAuditLog {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspace_id String    @db.Uuid
+  user_id      String?   @db.Uuid
+  action       String
+  menu_id      String?   @db.Uuid
+  details_json Json?
+
+  created_at   DateTime  @default(now())
+
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+  user         User?     @relation(fields: [user_id], references: [id])
+
+  @@index([workspace_id])
+}
+
+model MealEventLog {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspace_id String    @db.Uuid
+  event_type   String
+  payload_json Json
+  status       String    @default("PENDING")
+
+  created_at   DateTime  @default(now())
+
+  workspace    Workspace @relation(fields: [workspace_id], references: [id], onDelete: Cascade)
+
+  @@index([workspace_id])
+  @@index([status])
+}
+
+

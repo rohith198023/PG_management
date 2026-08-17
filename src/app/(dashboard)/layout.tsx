@@ -8,12 +8,15 @@ import {
   LayoutDashboard,
   BedDouble,
   UtensilsCrossed,
-  ReceiptCheck,
+  Receipt,
   LogOut,
   Menu,
   X,
   ShieldCheck,
   Users,
+  User,
+  CreditCard,
+  Sliders
 } from 'lucide-react'
 
 export default function DashboardLayout({
@@ -39,8 +42,11 @@ export default function DashboardLayout({
     { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
     { label: 'Property & Inventory', href: '/properties', icon: BedDouble },
     { label: 'Tenants & Admission', href: '/tenants', icon: Users },
+    { label: 'Invoices & Rent Desk', href: '/invoices', icon: Receipt },
     { label: 'Meal Management', href: '/meals', icon: UtensilsCrossed },
-    { label: 'Payment Verifications', href: '/payments', icon: ReceiptCheck },
+    { label: 'Payment Verifications', href: '/payments', icon: CreditCard },
+    { label: 'Accounting & P&L', href: '/accounting', icon: Sliders },
+    { label: 'Gateway Settings', href: '/settings/gateways', icon: Sliders },
   ]
 
   const handleLogout = async () => {
@@ -49,9 +55,9 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex font-sans">
       {/* Desktop Sidebar */}
-      <aside className="hidden lg:flex w-64 flex-col border-r border-slate-800 bg-slate-900/60 p-4 backdrop-blur-xl">
+      <aside className="hidden lg:flex w-64 flex-col border-r border-slate-800 bg-slate-900/60 p-4 backdrop-blur-xl shrink-0">
         <div className="flex items-center space-x-3 px-2 py-4 border-b border-slate-800">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600/20 text-indigo-400 ring-1 ring-indigo-500/30">
             <Building2 className="h-6 w-6" />
@@ -76,7 +82,7 @@ export default function DashboardLayout({
                 href={item.href}
                 className={`flex items-center space-x-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all min-h-[44px] ${
                   active
-                    ? 'bg-indigo-600/20 text-indigo-400 ring-1 ring-indigo-500/30'
+                    ? 'bg-indigo-600/20 text-indigo-400 ring-1 ring-indigo-500/30 font-semibold'
                     : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
                 }`}
               >
@@ -108,7 +114,7 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 overflow-x-hidden">
         {/* Mobile Topbar */}
         <header className="lg:hidden flex items-center justify-between border-b border-slate-800 bg-slate-900/80 px-4 py-3 backdrop-blur-md">
           <div className="flex items-center space-x-3">

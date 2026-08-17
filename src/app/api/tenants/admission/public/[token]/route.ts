@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, signAccessToken } from '@/lib/auth'
-import { postJournalEntries } from '@/lib/ledger'
+import { postJournalEntries } from '@/lib/ledger/posting'
 import { z } from 'zod'
 
 const completeAdmissionSchema = z.object({

@@ -1,127 +1,132 @@
-import { NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { z } from 'zod'
+import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import { requireAuth } from '@/lib/rbac';
+import { z } from 'zod';
+import { processPaymentProofOCR, evaluateFraudRisk } from '@/lib/ocr_fraud';
+import { attemptAutoReconciliation } from '@/lib/auto_reconciliation';
 
-const uploadProofSchema = z.object({
+const proofSchema = z.object({
   invoiceId: z.string().uuid(),
-  amount: z.number().positive(),
-  proofImageUrl: z.string().min(1, 'Proof image URL is required'),
+  proofImageUrl: z.string().url('Proof image URL is required'),
   utrNumber: z.string().optional(),
   notes: z.string().optional(),
-})
+});
 
-// GET /api/payments/proof -> Pending Verification Queue for Managers/Admins
-export async function GET(request: Request) {
-  const workspaceId = request.headers.get('x-workspace-id')
-  const role = request.headers.get('x-user-role')
-
-  if (!workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  if (role !== 'WORKSPACE_ADMIN' && role !== 'MANAGER' && role !== 'PLATFORM_SUPER_ADMIN') {
-    return NextResponse.json({ error: 'Forbidden: Insufficient privileges' }, { status: 403 })
-  }
-
-  const pendingProofs = await prisma.paymentProof.findMany({
-    where: {
-      workspace_id: workspaceId,
-      payment: {
-        status: 'PENDING_VERIFICATION',
-      },
-    },
-    include: {
-      payment: {
-        include: {
-          tenant: {
-            include: {
-              user: true,
-              bed: {
-                include: {
-                  room: true,
-                },
-              },
-            },
-          },
-          invoice: true,
-        },
-      },
-    },
-    orderBy: { created_at: 'desc' },
-  })
-
-  return NextResponse.json({ pendingProofs })
-}
-
-// POST /api/payments/proof -> Tenant Upload Payment Proof
-export async function POST(request: Request) {
-  const workspaceId = request.headers.get('x-workspace-id')
-  const userId = request.headers.get('x-user-id')
-
-  if (!workspaceId || !userId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
+export async function POST(req: Request) {
   try {
-    const body = await request.json()
-    const validated = uploadProofSchema.parse(body)
+    const auth = await requireAuth(req);
+    if ('response' in auth) return auth.response;
 
-    const tenant = await prisma.tenantProfile.findUnique({
-      where: { user_id: userId },
-    })
-
-    if (!tenant || tenant.workspace_id !== workspaceId) {
-      return NextResponse.json({ error: 'Forbidden: Tenant profile not found' }, { status: 403 })
-    }
+    const workspaceId = auth.session.workspaceId;
+    const body = await req.json();
+    const { invoiceId, proofImageUrl, utrNumber, notes } = proofSchema.parse(body);
 
     const invoice = await prisma.invoice.findFirst({
-      where: {
-        id: validated.invoiceId,
-        workspace_id: workspaceId,
-        tenant_id: tenant.id,
-      },
-    })
+      where: { id: invoiceId, workspace_id: workspaceId },
+      include: { tenant: true },
+    });
 
     if (!invoice) {
-      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
     }
 
-    // Create Payment & PaymentProof in transaction (Status remains PENDING_VERIFICATION until human approval)
-    const result = await prisma.$transaction(async (tx) => {
-      const payment = await tx.payment.create({
-        data: {
-          workspace_id: workspaceId,
-          tenant_id: tenant.id,
-          invoice_id: invoice.id,
-          amount: validated.amount,
-          source: 'MANUAL_UPLOAD',
-          status: 'PENDING_VERIFICATION',
-          transaction_ref: validated.utrNumber || `PROOF-${Date.now()}`,
-        },
-      })
+    const dueAmount = Number(invoice.total_amount) - Number(invoice.amount_paid);
 
-      const proof = await tx.paymentProof.create({
-        data: {
-          workspace_id: workspaceId,
-          payment_id: payment.id,
-          proof_image_url: validated.proofImageUrl,
-          utr_number: validated.utrNumber,
-          notes: validated.notes,
-        },
-      })
+    // 1. Run OCR Processing Engine
+    const ocrResult = await processPaymentProofOCR(proofImageUrl, notes || utrNumber || null, dueAmount);
+    const finalUtr = utrNumber || ocrResult.utrNumber;
 
-      return { payment, proof }
-    })
+    // 2. Run Fraud Detection Risk Engine
+    const fraudResult = await evaluateFraudRisk(
+      workspaceId,
+      finalUtr,
+      ocrResult.extractedAmount,
+      dueAmount,
+      ocrResult.overallConfidence
+    );
 
+    // 3. Create Payment & PaymentProof records
+    const payment = await prisma.payment.create({
+      data: {
+        workspace_id: workspaceId,
+        tenant_id: invoice.tenant_id,
+        invoice_id: invoice.id,
+        amount: dueAmount,
+        source: 'MANUAL_UPLOAD',
+        status: 'PENDING_VERIFICATION',
+        transaction_ref: finalUtr ? `UTR-${finalUtr}` : `MANUAL-${Date.now()}`,
+      },
+    });
+
+    const proof = await prisma.paymentProof.create({
+      data: {
+        workspace_id: workspaceId,
+        payment_id: payment.id,
+        proof_image_url: proofImageUrl,
+        utr_number: finalUtr,
+        notes,
+      },
+    });
+
+    // 4. Safely attach OCR & Fraud Check records if models exist
+    if ((prisma as any).oCRResult) {
+      try {
+        await (prisma as any).oCRResult.create({
+          data: {
+            proof_id: proof.id,
+            utr_number: finalUtr,
+            amount: ocrResult.extractedAmount,
+            payment_date: ocrResult.paymentDate,
+            merchant_vpa: ocrResult.merchantVpa,
+            overall_confidence: ocrResult.overallConfidence,
+            utr_matched: ocrResult.utrMatched,
+            amount_matched: ocrResult.amountMatched,
+            merchant_matched: ocrResult.merchantMatched,
+            raw_text: ocrResult.rawText,
+          },
+        });
+      } catch (e) {
+        console.warn('OCRResult creation skipped:', e);
+      }
+    }
+
+    if ((prisma as any).fraudCheck) {
+      try {
+        await (prisma as any).fraudCheck.create({
+          data: {
+            proof_id: proof.id,
+            risk_level: fraudResult.riskLevel,
+            risk_score: fraudResult.riskScore,
+            flags: fraudResult.flags,
+            utr_duplicate_count: fraudResult.utrDuplicateCount,
+            is_flagged: fraudResult.isFlagged,
+          },
+        });
+      } catch (e) {
+        console.warn('FraudCheck creation skipped:', e);
+      }
+    }
+
+    // 5. Manual uploads enter PENDING_VERIFICATION queue for manager inspection
     return NextResponse.json({
-      message: 'Payment proof uploaded successfully and submitted for manager verification',
-      payment: result.payment,
-    }, { status: 201 })
+      message: 'Payment receipt uploaded successfully! Placed in Manager Review Queue.',
+      paymentId: payment.id,
+      proofId: proof.id,
+      ocr: {
+        confidence: ocrResult.overallConfidence,
+        utrMatched: ocrResult.utrMatched,
+        amountMatched: ocrResult.amountMatched,
+        merchantMatched: ocrResult.merchantMatched,
+      },
+      fraud: {
+        riskLevel: fraudResult.riskLevel,
+        riskScore: fraudResult.riskScore,
+        flags: fraudResult.flags,
+      },
+      autoReconciled: false,
+    });
   } catch (error: any) {
-    if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.errors[0].message }, { status: 400 })
-    }
-    console.error('Payment proof upload error:', error)
-    return NextResponse.json({ error: 'Failed to upload payment proof' }, { status: 500 })
+    console.error('Proof Upload Error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to upload proof' }, { status: 500 });
   }
 }
