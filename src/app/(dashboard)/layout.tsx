@@ -16,7 +16,9 @@ import {
   Users,
   User,
   CreditCard,
-  Sliders
+  Sliders,
+  Bell,
+  Wrench
 } from 'lucide-react'
 
 export default function DashboardLayout({
@@ -44,8 +46,10 @@ export default function DashboardLayout({
     { label: 'Tenants & Admission', href: '/tenants', icon: Users },
     { label: 'Invoices & Rent Desk', href: '/invoices', icon: Receipt },
     { label: 'Meal Management', href: '/meals', icon: UtensilsCrossed },
+    { label: 'Maintenance Desk', href: '/complaints', icon: Wrench },
     { label: 'Payment Verifications', href: '/payments', icon: CreditCard },
     { label: 'Accounting & P&L', href: '/accounting', icon: Sliders },
+    { label: 'Notification Dispatch', href: '/notifications', icon: Bell },
     { label: 'Gateway Settings', href: '/settings/gateways', icon: Sliders },
   ]
 

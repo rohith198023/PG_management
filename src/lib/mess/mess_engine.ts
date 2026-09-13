@@ -251,3 +251,56 @@ export async function processAtomicMealSelection({
     }
   })
 }
+
+// ── Standalone helpers exported for meal API routes ──────────────────────────
+
+/**
+ * Records a meal audit log entry directly (outside of an atomic transaction).
+ * Positional args: (workspaceId, userId, action, menuId?, details?)
+ */
+export async function recordMealAuditLog(
+  workspaceId: string,
+  userId: string | null | undefined,
+  action: string,
+  menuId?: string | null,
+  details?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await prisma.mealAuditLog.create({
+      data: {
+        workspace_id: workspaceId,
+        user_id: userId ?? null,
+        action,
+        menu_id: menuId ?? null,
+        details_json: details ?? {},
+      },
+    })
+  } catch (err) {
+    // Non-critical — do not throw, just log
+    console.warn('[recordMealAuditLog] Failed to write audit log:', err)
+  }
+}
+
+/**
+ * Emits a meal event to the MealEventLog outbox table for downstream processing.
+ * Positional args: (workspaceId, eventType, payload)
+ */
+export async function emitMealEvent(
+  workspaceId: string,
+  eventType: string,
+  payload: Record<string, unknown>
+): Promise<void> {
+  try {
+    await prisma.mealEventLog.create({
+      data: {
+        workspace_id: workspaceId,
+        event_type: eventType,
+        payload_json: payload,
+        status: 'PENDING',
+      },
+    })
+  } catch (err) {
+    // Non-critical — do not throw, just log
+    console.warn('[emitMealEvent] Failed to emit meal event:', err)
+  }
+}

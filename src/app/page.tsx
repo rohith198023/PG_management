@@ -66,7 +66,7 @@ export default function Home() {
             </div>
             <h3 className="text-lg font-bold text-white">Per-Bed Inventory Hierarchy</h3>
             <p className="text-xs text-slate-400">
-              Building -> Floor -> Room -> Bed occupancy tracking. Real-time vacant bed alerts and automated state changes.
+              Building &rarr; Floor &rarr; Room &rarr; Bed occupancy tracking. Real-time vacant bed alerts and automated state changes.
             </p>
           </div>
 

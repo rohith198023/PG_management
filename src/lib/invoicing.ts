@@ -186,5 +186,73 @@ export async function createRecurringInvoiceForLease(
     })
   }
 
+  // Multi-Channel Automated Notification Enqueue
+  try {
+    const tenantUser = invoice.tenant?.user
+    if (tenantUser) {
+      const monthStr = issueDate.toLocaleString('default', { month: 'long', year: 'numeric' })
+      const dueDateStr = dueDate.toISOString().split('T')[0]
+      const recipientName = `${tenantUser.first_name || ''} ${tenantUser.last_name || ''}`.trim() || 'Resident'
+      const target = tenantUser.email || tenantUser.phone || 'resident@pg.com'
+
+      // Enqueue Email Notification
+      await (tx as any).notificationQueue.create({
+        data: {
+          workspace_id: workspaceId,
+          recipient_id: tenantUser.id,
+          channel: 'EMAIL',
+          type: 'INVOICE_ISSUED',
+          target: tenantUser.email || target,
+          subject: `Invoice ${invoiceNumber} Generated for ${monthStr}`,
+          rendered_body: `Hello ${recipientName}, your rent invoice ${invoiceNumber} for ${monthStr} (₹${totalAmount}) is due on ${dueDateStr}.`,
+          payload_json: {
+            workspaceId,
+            recipientId: tenantUser.id,
+            recipientName,
+            target: tenantUser.email || target,
+            invoiceNumber,
+            amount: totalAmount,
+            dueDate: dueDateStr,
+            month: monthStr,
+            paymentUrl: `/tenant/invoices`,
+          },
+          status: 'PENDING',
+          attempts: 0,
+          max_retries: 3,
+        },
+      })
+
+      // Enqueue In-App Alert
+      await (tx as any).notificationQueue.create({
+        data: {
+          workspace_id: workspaceId,
+          recipient_id: tenantUser.id,
+          channel: 'IN_APP',
+          type: 'INVOICE_ISSUED',
+          target: tenantUser.id,
+          subject: `New Invoice ${invoiceNumber}`,
+          rendered_body: `Your rent invoice for ${monthStr} of ₹${totalAmount} has been generated. Due: ${dueDateStr}.`,
+          payload_json: {
+            workspaceId,
+            recipientId: tenantUser.id,
+            recipientName,
+            target: tenantUser.id,
+            invoiceNumber,
+            amount: totalAmount,
+            dueDate: dueDateStr,
+            month: monthStr,
+            paymentUrl: `/tenant/invoices`,
+          },
+          status: 'PENDING',
+          attempts: 0,
+          max_retries: 3,
+        },
+      })
+    }
+  } catch (notifErr) {
+    console.error('Failed to enqueue invoice notification:', notifErr)
+  }
+
   return invoice
 }
+

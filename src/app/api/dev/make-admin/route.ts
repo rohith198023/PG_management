@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     // Overwrite the existing cookie with the new token
     response.cookies.set('access_token', newToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: (process.env.NODE_ENV as string) === 'production',
       sameSite: 'lax',
       maxAge: 86400,
       path: '/',

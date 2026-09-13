@@ -74,9 +74,12 @@ export async function requireAuth(
 /**
  * Validates authentication session AND checks user role permissions.
  */
-export async function requireRole(request: Request, allowedRoles: UserRole[]) {
+export async function requireRole(
+  request: Request,
+  allowedRoles: UserRole[]
+): Promise<{ session: JWTPayload; error?: undefined } | { error: string; response: NextResponse }> {
   const authResult = await requireAuth(request)
-  if (authResult.error) return authResult
+  if (!('session' in authResult)) return authResult
 
   const { session } = authResult
   if (!allowedRoles.includes(session.role) && session.role !== 'PLATFORM_SUPER_ADMIN') {
@@ -86,5 +89,5 @@ export async function requireRole(request: Request, allowedRoles: UserRole[]) {
     }
   }
 
-  return authResult
+  return { session, error: undefined }
 }

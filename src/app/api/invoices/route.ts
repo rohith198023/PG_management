@@ -15,7 +15,7 @@ const createManualInvoiceSchema = z.object({
 export async function GET(request: Request) {
   try {
     const authResult = await requireRole(request, ['WORKSPACE_ADMIN', 'MANAGER', 'STAFF'])
-    if (authResult.error) return authResult.response
+    if ('response' in authResult) return authResult.response
 
     const { session } = authResult
     const { searchParams } = new URL(request.url)
@@ -104,7 +104,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const authResult = await requireRole(request, ['WORKSPACE_ADMIN', 'MANAGER'])
-    if (authResult.error) return authResult.response
+    if ('response' in authResult) return authResult.response
 
     const { session } = authResult
     const body = await request.json()

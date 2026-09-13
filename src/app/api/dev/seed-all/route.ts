@@ -48,6 +48,21 @@ export async function GET() {
       },
     })
 
+    // 3b. Create Platform Super Admin
+    await prisma.user.upsert({
+      where: { email: 'superadmin@pgsas.com' },
+      update: { workspace_id: workspace.id },
+      create: {
+        workspace_id: workspace.id,
+        email: 'superadmin@pgsas.com',
+        password_hash: passwordHash,
+        first_name: 'Super',
+        last_name: 'Admin',
+        phone: '+919999999999',
+        role: 'PLATFORM_SUPER_ADMIN',
+      },
+    })
+
     // 4. Create Property if not exists
     let property = await prisma.property.findFirst({
       where: { workspace_id: workspace.id, name: 'Royal Living — HSR Branch' },
@@ -144,31 +159,90 @@ export async function GET() {
         },
       })
 
-      // 10. Tenant
-      const tenantUser = await prisma.user.upsert({
-        where: { email: 'tenant@royalliving.com' },
-        update: { workspace_id: workspace.id },
-        create: {
-          workspace_id: workspace.id,
-          email: 'tenant@royalliving.com',
-          password_hash: passwordHash,
-          first_name: 'Anish',
-          last_name: 'Sharma',
-          phone: '+919876543212',
-          role: 'TENANT',
-        },
-      })
+    }
 
-      await prisma.tenantProfile.upsert({
+    // Ensure tenant user and active lease exist
+    const tenantUser = await prisma.user.upsert({
+      where: { email: 'tenant@royalliving.com' },
+      update: { workspace_id: workspace.id },
+      create: {
+        workspace_id: workspace.id,
+        email: 'tenant@royalliving.com',
+        password_hash: passwordHash,
+        first_name: 'Anish',
+        last_name: 'Sharma',
+        phone: '+919876543212',
+        role: 'TENANT',
+      },
+    })
+
+    const occupiedBed = await prisma.bed.findFirst({
+      where: { workspace_id: workspace.id },
+    })
+
+    if (occupiedBed) {
+      const tenantProfile = await prisma.tenantProfile.upsert({
         where: { user_id: tenantUser.id },
-        update: {},
+        update: { workspace_id: workspace.id, bed_id: occupiedBed.id },
         create: {
           workspace_id: workspace.id,
           user_id: tenantUser.id,
-          bed_id: bedA.id,
+          bed_id: occupiedBed.id,
           emergency_contact: '+919800000000',
         },
       })
+
+      let lease = await prisma.lease.findFirst({
+        where: { workspace_id: workspace.id, tenant_id: tenantProfile.id, status: 'ACTIVE' },
+      })
+
+      if (!lease) {
+        lease = await prisma.lease.create({
+          data: {
+            workspace_id: workspace.id,
+            tenant_id: tenantProfile.id,
+            bed_id: occupiedBed.id,
+            start_date: new Date(),
+            rent_amount: 8500,
+            deposit_amount: 15000,
+            status: 'ACTIVE',
+          },
+        })
+      }
+
+      const existingInvoice = await prisma.invoice.findFirst({
+        where: { workspace_id: workspace.id, tenant_id: tenantProfile.id },
+      })
+
+      if (!existingInvoice) {
+        const dueDate = new Date()
+        dueDate.setDate(dueDate.getDate() + 7)
+
+        await prisma.invoice.create({
+          data: {
+            workspace_id: workspace.id,
+            tenant_id: tenantProfile.id,
+            invoice_number: `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-0001`,
+            issue_date: new Date(),
+            due_date: dueDate,
+            subtotal: 8500,
+            tax_amount: 0,
+            total_amount: 8500,
+            amount_paid: 0,
+            status: 'ISSUED',
+            line_items: {
+              create: [
+                {
+                  description: 'Monthly Room Rent — Room 101 (Bed 101-A)',
+                  quantity: 1,
+                  unit_price: 8500,
+                  amount: 8500,
+                },
+              ],
+            },
+          },
+        })
+      }
     }
 
     return NextResponse.json({

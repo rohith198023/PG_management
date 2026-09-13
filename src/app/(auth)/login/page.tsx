@@ -30,8 +30,14 @@ export default function LoginPage() {
         throw new Error(data.error || 'Login failed')
       }
 
-      // Redirect to Admin Dashboard
-      router.push('/dashboard')
+      // Role-based smart redirect
+      if (data.user?.role === 'TENANT') {
+        router.push('/tenant')
+      } else if (data.user?.role === 'PLATFORM_SUPER_ADMIN') {
+        router.push('/super-admin')
+      } else {
+        router.push('/dashboard')
+      }
     } catch (err: any) {
       setError(err.message)
     } finally {

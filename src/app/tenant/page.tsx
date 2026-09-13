@@ -96,7 +96,7 @@ export default function TenantPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto space-y-8 pb-12">
+    <div className="space-y-8 pb-12">
       {/* Top Banner */}
       <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/40 p-6 backdrop-blur-xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -123,6 +123,38 @@ export default function TenantPortalPage() {
               </span>
             </div>
           </div>
+        </div>
+
+        {/* Quick Nav Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-indigo-500/20">
+          <a
+            href="/tenant/invoices"
+            className="p-3 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-indigo-500/40 transition text-center space-y-1 group"
+          >
+            <IndianRupee className="w-5 h-5 text-indigo-400 mx-auto group-hover:scale-110 transition" />
+            <div className="text-xs font-semibold text-white">Invoices & Rent</div>
+          </a>
+          <a
+            href="/tenant/complaints"
+            className="p-3 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-indigo-500/40 transition text-center space-y-1 group"
+          >
+            <Clock className="w-5 h-5 text-amber-400 mx-auto group-hover:scale-110 transition" />
+            <div className="text-xs font-semibold text-white">Complaints Desk</div>
+          </a>
+          <a
+            href="/tenant/meals"
+            className="p-3 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-indigo-500/40 transition text-center space-y-1 group"
+          >
+            <Utensils className="w-5 h-5 text-emerald-400 mx-auto group-hover:scale-110 transition" />
+            <div className="text-xs font-semibold text-white">Mess Meals</div>
+          </a>
+          <a
+            href="/tenant/notifications"
+            className="p-3 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-indigo-500/40 transition text-center space-y-1 group"
+          >
+            <ShieldCheck className="w-5 h-5 text-purple-400 mx-auto group-hover:scale-110 transition" />
+            <div className="text-xs font-semibold text-white">Alerts & Notices</div>
+          </a>
         </div>
       </div>
 

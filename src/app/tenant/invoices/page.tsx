@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { 
   Receipt, 
   Clock, 
@@ -52,7 +53,7 @@ export default function TenantInvoicesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#080C14] text-slate-100 p-6 md:p-10 font-sans space-y-8 max-w-5xl mx-auto">
+    <div className="space-y-8 pb-12">
       
       {/* HEADER */}
       <div className="border-b border-slate-800 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

@@ -6,7 +6,7 @@ import { createRecurringInvoiceForLease } from '@/lib/invoicing'
 export async function POST(request: Request) {
   try {
     const authResult = await requireRole(request, ['WORKSPACE_ADMIN', 'MANAGER'])
-    if (authResult.error) return authResult.response
+    if ('response' in authResult) return authResult.response
 
     const { session } = authResult
     const workspaceId = session.workspaceId

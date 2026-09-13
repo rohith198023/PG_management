@@ -141,16 +141,16 @@ export default function ResidentPaymentPortal() {
   };
 
   return (
-    <div className="space-y-8 pb-16 text-slate-100">
+    <div className="space-y-8 pb-12">
       {/* Top Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <Link href="/tenant/dashboard" className="flex items-center space-x-1 text-xs font-semibold text-indigo-400 hover:text-indigo-300">
+          <Link href="/tenant" className="inline-flex items-center space-x-1.5 text-xs font-semibold text-indigo-400 hover:text-indigo-300 mb-2">
             <ArrowLeft className="h-3.5 w-3.5" />
-            <span>Back to Resident Portal</span>
+            <span>Back to Resident Overview</span>
           </Link>
-          <h1 className="text-3xl font-extrabold text-white mt-1">Payment & Receipts Portal</h1>
-          <p className="text-sm text-slate-400 mt-1">Pay monthly rent online via instant gateways, use resident wallet credits, or submit manual UPI payment receipts.</p>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white">Payment & Receipts Portal</h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1">Pay monthly rent online via instant gateways, use resident wallet credits, or submit manual UPI payment receipts.</p>
         </div>
 
         {/* Resident Wallet Balance Card */}

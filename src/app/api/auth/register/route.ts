@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword, signAccessToken, signRefreshToken } from '@/lib/auth'
 import { initializeWorkspaceLedgerAccounts } from '@/lib/ledger/coa'
-import { PropertyType } from '@prisma/client'
+import { Prisma, PropertyType } from '@prisma/client'
 import { z } from 'zod'
 
 const registerSchema = z.object({
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
     // Transaction to create Workspace, User, Property Inventory, and default General Ledger accounts with 30s timeout
     const result = await prisma.$transaction(
-      async (tx) => {
+      async (tx: Prisma.TransactionClient) => {
         // 1. Create Workspace
         const workspace = await tx.workspace.create({
           data: {
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 
         // 3. Create Property Inventory if setup details are provided
         if (validated.branchName || validated.floorsCount) {
-          const propType = (validated.propertyType as PropertyType) || PropertyType.COED
+          const propType = (validated.propertyType as PropertyType) || PropertyType.PG
           const floorsCount = validated.floorsCount || 4
           const roomsPerFloor = validated.roomsPerFloor || 5
           const bedsPerRoom = validated.bedsPerRoom || 2

@@ -60,6 +60,29 @@ export async function POST(request: Request) {
     const body = await request.json()
     const validated = propertySchema.parse(body)
 
+    // ── Subscription Tier Limit Check ───────────────────────────────────────
+    const totalNewBeds = validated.floorsCount * validated.roomsPerFloor * validated.bedsPerRoom
+    const subscription = await prisma.workspaceSubscription.findUnique({
+      where: { workspace_id: ctx.workspaceId! },
+    })
+    if (subscription) {
+      const currentBedCount = await prisma.bed.count({
+        where: { workspace_id: ctx.workspaceId!, deleted_at: null },
+      })
+      if (currentBedCount + totalNewBeds > subscription.max_beds) {
+        return NextResponse.json(
+          {
+            error: `Subscription limit exceeded. Your ${subscription.plan_name} plan allows a maximum of ${subscription.max_beds} beds. You currently have ${currentBedCount} beds and are trying to add ${totalNewBeds} more.`,
+            limitExceeded: true,
+            maxBeds: subscription.max_beds,
+            currentBeds: currentBedCount,
+          },
+          { status: 403 }
+        )
+      }
+    }
+
+
     const property = await prisma.$transaction(async (tx) => {
       // 1. Create Property
       const newProperty = await tx.property.create({

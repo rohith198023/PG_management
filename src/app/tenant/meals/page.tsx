@@ -83,7 +83,7 @@ export default function TenantMealsPage() {
   })
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-12">
+    <div className="space-y-8 pb-12">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-white sm:text-3xl flex items-center gap-3">

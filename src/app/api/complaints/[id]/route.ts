@@ -128,6 +128,45 @@ export async function PATCH(request: Request, { params }: { params: { id: string
       activityNote
     )
 
+    // Enqueue Tenant Notification
+    try {
+      const tenantUser = updated.tenant?.user
+      if (tenantUser) {
+        const recipientName = `${tenantUser.first_name || ''} ${tenantUser.last_name || ''}`.trim() || 'Resident'
+        const staffName = updated.assigned_staff ? `${updated.assigned_staff.first_name} ${updated.assigned_staff.last_name}` : undefined
+
+        await (prisma as any).notificationQueue.create({
+          data: {
+            workspace_id: authCtx.workspaceId,
+            recipient_id: tenantUser.id,
+            channel: 'IN_APP',
+            type: 'COMPLAINT_UPDATE',
+            target: tenantUser.id,
+            subject: `Update on Ticket #${complaintId.substring(0, 8)}: ${updated.status}`,
+            rendered_body: `Your ticket "${updated.title}" status is now ${updated.status}. ${resolutionNotes ? `Notes: ${resolutionNotes}` : ''}`,
+            payload_json: {
+              workspaceId: authCtx.workspaceId,
+              recipientId: tenantUser.id,
+              recipientName,
+              target: tenantUser.id,
+              ticketId: complaintId.substring(0, 8),
+              title: updated.title,
+              oldStatus,
+              newStatus: updated.status,
+              priority: updated.priority,
+              assignedStaffName: staffName,
+              updateNotes: resolutionNotes,
+            },
+            status: 'PENDING',
+            attempts: 0,
+            max_retries: 3,
+          },
+        })
+      }
+    } catch (notifErr) {
+      console.error('Failed to enqueue complaint notification:', notifErr)
+    }
+
     return NextResponse.json({
       message: 'Complaint ticket updated! 🛠️',
       complaint: updated,
