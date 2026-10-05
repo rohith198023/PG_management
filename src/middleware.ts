@@ -2,20 +2,25 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { jwtVerify } from 'jose'
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'super-secret-jwt-token-key-change-this-in-production-32chars'
-)
+const rawSecret = process.env.JWT_SECRET || (process.env.NODE_ENV !== 'production' ? 'super-secret-jwt-token-key-change-this-in-production-32chars' : '')
+if (!rawSecret && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: JWT_SECRET environment variable must be set in production!')
+}
+const JWT_SECRET = new TextEncoder().encode(rawSecret)
+
 
 // Public routes that do not require authentication
 const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/refresh',
+  '/api/auth/logout',
   '/api/dev',
   '/login',
   '/register',
   '/',
 ]
+
 
 // ── Security Response Headers (Phase 11) ────────────────────────────────────
 function applySecurityHeaders(response: NextResponse): NextResponse {
@@ -42,10 +47,12 @@ export async function middleware(request: NextRequest) {
   // Check if path is public or static asset
   if (
     PUBLIC_PATHS.some(
-      (path) => pathname === path || pathname.startsWith(path) || pathname.startsWith('/_next') || pathname.includes('.')
+      (path) => path === '/' ? pathname === '/' : (pathname === path || pathname.startsWith(path))
     ) ||
     pathname.startsWith('/admission') ||
-    pathname.startsWith('/api/tenants/admission/public')
+    pathname.startsWith('/api/tenants/admission/public') ||
+    pathname.startsWith('/_next') ||
+    pathname.includes('.')
   ) {
     const res = NextResponse.next()
     return applySecurityHeaders(res)

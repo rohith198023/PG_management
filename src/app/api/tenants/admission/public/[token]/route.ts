@@ -85,31 +85,68 @@ export async function POST(
 
     // Execute atomic transaction for tenant creation, bed status update, lease activation, and ledger posting
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Create User account with TENANT role
-      const user = await tx.user.create({
-        data: {
-          workspace_id: workspaceId,
-          email: invite.email,
-          password_hash: passwordHash,
-          first_name: invite.first_name,
-          last_name: invite.last_name,
-          phone: invite.phone,
-          role: 'TENANT',
-        },
+      // 1. Create or update User account with TENANT role
+      let user = await tx.user.findUnique({
+        where: { email: invite.email },
       })
 
-      // 2. Create TenantProfile with digital KYC documents
-      const tenantProfile = await tx.tenantProfile.create({
-        data: {
-          workspace_id: workspaceId,
-          user_id: user.id,
-          bed_id: invite.bed_id,
-          emergency_contact: validated.emergencyContact,
-          id_proof_type: validated.idProofType,
-          id_proof_number: validated.idProofNumber,
-          id_proof_url: validated.idProofUrl,
-        },
+      if (user) {
+        user = await tx.user.update({
+          where: { id: user.id },
+          data: {
+            workspace_id: workspaceId,
+            password_hash: passwordHash,
+            first_name: invite.first_name,
+            last_name: invite.last_name,
+            phone: invite.phone,
+            role: 'TENANT',
+            is_active: true,
+          },
+        })
+      } else {
+        user = await tx.user.create({
+          data: {
+            workspace_id: workspaceId,
+            email: invite.email,
+            password_hash: passwordHash,
+            first_name: invite.first_name,
+            last_name: invite.last_name,
+            phone: invite.phone,
+            role: 'TENANT',
+          },
+        })
+      }
+
+      // 2. Create or update TenantProfile with digital KYC documents
+      let tenantProfile = await tx.tenantProfile.findUnique({
+        where: { user_id: user.id },
       })
+
+      if (tenantProfile) {
+        tenantProfile = await tx.tenantProfile.update({
+          where: { id: tenantProfile.id },
+          data: {
+            workspace_id: workspaceId,
+            bed_id: invite.bed_id,
+            emergency_contact: validated.emergencyContact,
+            id_proof_type: validated.idProofType,
+            id_proof_number: validated.idProofNumber,
+            id_proof_url: validated.idProofUrl,
+          },
+        })
+      } else {
+        tenantProfile = await tx.tenantProfile.create({
+          data: {
+            workspace_id: workspaceId,
+            user_id: user.id,
+            bed_id: invite.bed_id,
+            emergency_contact: validated.emergencyContact,
+            id_proof_type: validated.idProofType,
+            id_proof_number: validated.idProofNumber,
+            id_proof_url: validated.idProofUrl,
+          },
+        })
+      }
 
       // 3. Create & Activate Lease
       const startDate = new Date()

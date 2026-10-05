@@ -116,14 +116,27 @@ export async function POST(request: Request) {
 
     const publicAdmissionUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/admission/${result.token}`
 
+    // Automatically send invitation email to resident
+    try {
+      const { dispatchNotification } = await import('@/lib/notifications/dispatcher')
+      await dispatchNotification('EMAIL', validated.email, {
+        subject: `Welcome to PG_SAS — Complete Your Digital Admission`,
+        body: `Hello ${validated.firstName},<br><br>You have been invited to complete your digital admission. Please follow the link below to set your password, upload KYC documents, and complete onboarding:<br><br><a href="${publicAdmissionUrl}" style="background-color: #4F46E5; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Complete Admission</a><br><br>Or copy this link: ${publicAdmissionUrl}<br><br>This invitation expires on ${expiresAt.toLocaleDateString()}.`,
+      })
+
+    } catch (emailErr) {
+      console.warn('Failed to send admission invitation email:', emailErr)
+    }
+
     return NextResponse.json(
       {
-        message: 'Tokenized admission invite generated and bed reserved successfully',
+        message: 'Tokenized admission invite generated, bed reserved, and email sent successfully',
         invite: result,
         publicAdmissionUrl,
       },
       { status: 201 }
     )
+
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors[0].message }, { status: 400 })

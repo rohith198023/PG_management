@@ -1,11 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import { Building2, ShieldCheck, UserCheck, KeyRound, Upload, CheckCircle2, Lock, ArrowRight } from 'lucide-react'
 
-export default function PublicAdmissionPage({ params }: { params: { token: string } }) {
+export default function PublicAdmissionPage({ params: propParams }: { params?: { token?: string } }) {
   const router = useRouter()
+  const routeParams = useParams()
+
+  // Robust token resolution: useParams() -> propParams -> window.location pathname fallback
+  const rawToken = (routeParams?.token as string) || propParams?.token
+  const [token, setToken] = useState<string>(rawToken || '')
+
   const [invite, setInvite] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -19,7 +25,23 @@ export default function PublicAdmissionPage({ params }: { params: { token: strin
   const [idProofUrl, setIdProofUrl] = useState('')
 
   useEffect(() => {
-    fetch(`/api/tenants/admission/public/${params.token}`)
+    let resolvedToken = rawToken
+    if (!resolvedToken && typeof window !== 'undefined') {
+      const match = window.location.pathname.match(/\/admission\/([^/?#]+)/)
+      if (match && match[1]) {
+        resolvedToken = match[1]
+      }
+    }
+    if (resolvedToken) {
+      setToken(resolvedToken)
+    }
+  }, [rawToken])
+
+  useEffect(() => {
+    if (!token) return
+
+    setLoading(true)
+    fetch(`/api/tenants/admission/public/${token}`)
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
@@ -33,7 +55,7 @@ export default function PublicAdmissionPage({ params }: { params: { token: strin
         setError('Failed to load admission invite details')
         setLoading(false)
       })
-  }, [params.token])
+  }, [token])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,7 +63,7 @@ export default function PublicAdmissionPage({ params }: { params: { token: strin
     setError('')
 
     try {
-      const res = await fetch(`/api/tenants/admission/public/${params.token}`, {
+      const res = await fetch(`/api/tenants/admission/public/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

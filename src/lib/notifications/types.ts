@@ -93,6 +93,7 @@ export type NotificationPayloadMap = {
 };
 
 export interface RenderedMessage {
+  title?: string;
   subject: string;
   body: string;
   plainText?: string;
@@ -102,6 +103,7 @@ export interface RenderedMessage {
     parameters: Record<string, string>;
   };
 }
+
 
 export interface DispatchResult {
   success: boolean;

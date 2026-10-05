@@ -73,24 +73,8 @@ export async function resolveWorkspaceContext(request: Request): Promise<Workspa
     }
   }
 
-  // Last resort: first workspace in the database (ORM then SQL fallback)
-  try {
-    let ws: any = null
-    try {
-      ws = await (prisma as any).workspace?.findFirst?.({ select: { id: true } })
-    } catch {}
-    
-    if (!ws) {
-      const rows = await prisma.$queryRaw`SELECT id FROM "Workspace" LIMIT 1;` as any[]
-      ws = rows[0] || null
-    }
-    
-    if (ws) {
-      return { workspaceId: ws.id, role: role || 'WORKSPACE_ADMIN', userId: userId || '' }
-    }
-  } catch (e) {
-    console.warn('[resolveWorkspaceContext] Workspace SQL lookup failed:', e)
-  }
-
+  // Strict security: Never guess or fallback to a default/first workspace.
+  // If workspaceId cannot be resolved from JWT or the user's DB record, return null.
   return { workspaceId: null, role, userId }
 }
+

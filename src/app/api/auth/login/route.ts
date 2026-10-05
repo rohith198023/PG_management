@@ -35,6 +35,7 @@ export async function POST(request: Request) {
     }
 
     const accessToken = signAccessToken(payload)
+    const refreshToken = signRefreshToken(payload)
 
     const response = NextResponse.json({
       user: {
@@ -50,17 +51,27 @@ export async function POST(request: Request) {
         slug: user.workspace.slug,
       },
       accessToken,
+      refreshToken,
     })
 
     response.cookies.set('access_token', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 86400,
+      maxAge: 86400, // 1 day
+      path: '/',
+    })
+
+    response.cookies.set('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 86400, // 7 days
       path: '/',
     })
 
     return response
+
   } catch (error: any) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.errors[0].message }, { status: 400 })

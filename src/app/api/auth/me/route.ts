@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { resolveWorkspaceContext } from '@/lib/workspace-context'
 
 export async function GET(request: Request) {
-  const userId = request.headers.get('x-user-id')
-  const workspaceId = request.headers.get('x-workspace-id')
+  const ctx = await resolveWorkspaceContext(request)
+  const userId = ctx.userId
+  const workspaceId = ctx.workspaceId
 
   if (!userId || !workspaceId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

@@ -47,16 +47,23 @@ export default function DashboardLayout({
     { label: 'Invoices & Rent Desk', href: '/invoices', icon: Receipt },
     { label: 'Meal Management', href: '/meals', icon: UtensilsCrossed },
     { label: 'Maintenance Desk', href: '/complaints', icon: Wrench },
+    { label: 'Staff & Team', href: '/users', icon: Users },
     { label: 'Payment Verifications', href: '/payments', icon: CreditCard },
     { label: 'Accounting & P&L', href: '/accounting', icon: Sliders },
     { label: 'Notification Dispatch', href: '/notifications', icon: Bell },
     { label: 'Gateway Settings', href: '/settings/gateways', icon: Sliders },
+    { label: 'Workspace Settings', href: '/settings/workspace', icon: Building2 },
   ]
 
   const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch {}
     document.cookie = 'access_token=; Max-Age=0; path=/;'
+    document.cookie = 'refresh_token=; Max-Age=0; path=/;'
     router.push('/login')
   }
+
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex font-sans">

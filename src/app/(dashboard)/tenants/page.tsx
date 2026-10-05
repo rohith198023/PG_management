@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Users, Plus, ShieldCheck, BedDouble, Mail, Phone, Copy, CheckCircle2, Clock } from 'lucide-react'
+import { Users, Plus, ShieldCheck, BedDouble, Mail, Phone, Copy, CheckCircle2, Clock, UserMinus, AlertTriangle } from 'lucide-react'
 
 export default function TenantsPage() {
   const [tenants, setTenants] = useState<any[]>([])
@@ -10,6 +10,16 @@ export default function TenantsPage() {
   const [loading, setLoading] = useState(true)
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [copiedToken, setCopiedToken] = useState<string | null>(null)
+
+  // Move-out modal state
+  const [moveOutTenant, setMoveOutTenant] = useState<any | null>(null)
+  const [moveOutSubmitting, setMoveOutSubmitting] = useState(false)
+  const [moveOutForm, setMoveOutForm] = useState({
+    damageDeduction: 0,
+    deductionNotes: '',
+    refundMethod: 'BANK_TRANSFER',
+  })
+
 
   // Invite Form State
   const [formData, setFormData] = useState({
@@ -90,8 +100,31 @@ export default function TenantsPage() {
     })
   })
 
+  const handleMoveOutSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!moveOutTenant) return
+    setMoveOutSubmitting(true)
+    try {
+      const res = await fetch(`/api/tenants/${moveOutTenant.id}/move-out`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(moveOutForm),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to process move-out')
+      alert(`Move-out successfully processed! Bed released back to VACANT. Net Refund: ₹${data.settlement?.netRefundable ?? 0}`)
+      setMoveOutTenant(null)
+      fetchData()
+    } catch (err: any) {
+      alert(err.message)
+    } finally {
+      setMoveOutSubmitting(false)
+    }
+  }
+
   return (
     <div className="space-y-8">
+
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white sm:text-3xl">Tenant Directory & Digital Admission</h1>
@@ -180,11 +213,24 @@ export default function TenantsPage() {
                   <span className="text-slate-400">ID Proof ({t.id_proof_type || 'Aadhaar'})</span>
                   <span className="font-mono text-indigo-300">{t.id_proof_number || '1234-XXXX'}</span>
                 </div>
+
+                {t.bed_id && (
+                  <div className="pt-2 border-t border-slate-800/60 flex justify-end">
+                    <button
+                      onClick={() => setMoveOutTenant(t)}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-red-500/20 bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-all"
+                    >
+                      <UserMinus className="w-3.5 h-3.5" />
+                      Initiate Move-Out
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
         </div>
       )}
+
 
       {/* Generate Admission Invite Modal */}
       {showInviteModal && (
@@ -299,6 +345,80 @@ export default function TenantsPage() {
           </div>
         </div>
       )}
+
+      {/* Move-Out Settlement Modal */}
+      {moveOutTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <UserMinus className="w-5 h-5 text-red-400" />
+              <h3 className="text-lg font-bold text-white">
+                Initiate Move-Out: {moveOutTenant.user?.first_name} {moveOutTenant.user?.last_name}
+              </h3>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              This will calculate final balances, release Bed {moveOutTenant.bed?.bed_number || 'N/A'} back to VACANT status, and terminate the lease.
+            </p>
+
+            <form onSubmit={handleMoveOutSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Damages / Maintenance Deductions (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={moveOutForm.damageDeduction}
+                  onChange={(e) => setMoveOutForm({ ...moveOutForm, damageDeduction: parseFloat(e.target.value) || 0 })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Deduction Notes / Reason</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Wall painting, key replacement"
+                  value={moveOutForm.deductionNotes}
+                  onChange={(e) => setMoveOutForm({ ...moveOutForm, deductionNotes: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Refund Settlement Method</label>
+                <select
+                  value={moveOutForm.refundMethod}
+                  onChange={(e) => setMoveOutForm({ ...moveOutForm, refundMethod: e.target.value })}
+                  className="w-full rounded-lg border border-slate-700 bg-slate-800 p-2.5 text-sm text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="BANK_TRANSFER">Direct Bank Transfer (NEFT/IMPS)</option>
+                  <option value="UPI">UPI</option>
+                  <option value="CASH">Cash</option>
+                  <option value="ADJUSTED">Adjusted Against Dues</option>
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setMoveOutTenant(null)}
+                  className="flex-1 rounded-lg border border-slate-700 bg-slate-800 py-2.5 text-sm font-semibold text-slate-300 hover:bg-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={moveOutSubmitting}
+                  className="flex-1 rounded-lg bg-red-600 py-2.5 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50 transition-all shadow-lg shadow-red-600/30"
+                >
+                  {moveOutSubmitting ? 'Processing...' : 'Confirm Move-Out'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

@@ -2,8 +2,19 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { UserRole } from '@prisma/client'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-jwt-token-key-change-this-in-production-32chars'
-const REFRESH_TOKEN_SECRET = process.env.REFRESH_TOKEN_SECRET || 'super-secret-refresh-token-key-change-this-in-production-32chars'
+function getSecret(name: string, fallbackDev: string): string {
+  const secret = process.env[name]
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(`FATAL: ${name} environment variable must be set in production!`)
+    }
+    return fallbackDev
+  }
+  return secret
+}
+
+const JWT_SECRET = getSecret('JWT_SECRET', 'super-secret-jwt-token-key-change-this-in-production-32chars')
+const REFRESH_TOKEN_SECRET = getSecret('REFRESH_TOKEN_SECRET', 'super-secret-refresh-token-key-change-this-in-production-32chars')
 
 export interface JWTPayload {
   userId: string
@@ -11,6 +22,7 @@ export interface JWTPayload {
   role: UserRole
   workspaceId: string
 }
+
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = await bcrypt.genSalt(12)

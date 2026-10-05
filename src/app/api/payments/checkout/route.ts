@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/lib/rbac';
 import { z } from 'zod';
-import { postLedgerEntry } from '@/lib/ledger/posting';
-import { logPaymentAudit } from '@/lib/audit';
+import { createGatewayOrder } from '@/lib/payments/gateway';
 
 const checkoutSchema = z.object({
   invoiceId: z.string().uuid('Invalid invoice ID'),
@@ -18,6 +17,7 @@ export async function POST(req: Request) {
     if ('response' in auth) return auth.response;
 
     const workspaceId = auth.session.workspaceId;
+    const userId = auth.session.userId;
     const body = await req.json();
     const { invoiceId, gatewayProvider, customAmount } = checkoutSchema.parse(body);
 
@@ -27,7 +27,9 @@ export async function POST(req: Request) {
         workspace_id: workspaceId,
       },
       include: {
-        tenant: true,
+        tenant: {
+          include: { user: true },
+        },
       },
     });
 
@@ -46,105 +48,64 @@ export async function POST(req: Request) {
 
     const payAmount = customAmount ? Math.min(customAmount, dueAmount) : dueAmount;
 
-    // Safely check default bank account if bankAccount model exists
-    let defaultBankId = null;
-    if ((prisma as any).bankAccount) {
-      try {
-        const bank = await (prisma as any).bankAccount.findFirst({
-          where: { workspace_id: workspaceId, is_default: true },
-        });
-        if (bank) defaultBankId = bank.id;
-      } catch (e) {
-        console.warn('BankAccount query skipped:', e);
-      }
-    }
+    // Create a real order on the payment gateway
+    const orderResult = await createGatewayOrder({
+      workspaceId,
+      amount: payAmount,
+      receipt: invoice.invoice_number,
+      gatewayName: gatewayProvider,
+      notes: {
+        invoice_id: invoice.id,
+        tenant_id: invoice.tenant_id,
+        tenant_name: `${invoice.tenant.user.first_name} ${invoice.tenant.user.last_name}`,
+        user_id: userId,
+      },
+    });
 
-    const orderRef = `ORDER-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
-    let newPaymentId = '';
+    // Record PaymentIntent in DB with status CREATED
+    const idempotencyKey = `intent_${orderResult.orderId}`;
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
 
-    await prisma.$transaction(async (tx: any) => {
-      // 1. Create Payment
-      const paymentData: any = {
+    const paymentIntent = await prisma.paymentIntent.upsert({
+      where: { idempotency_key: idempotencyKey },
+      update: {
+        amount: payAmount,
+        gateway_order_id: orderResult.orderId,
+        expires_at: expiresAt,
+      },
+      create: {
         workspace_id: workspaceId,
         tenant_id: invoice.tenant_id,
         invoice_id: invoice.id,
         amount: payAmount,
-        source: 'GATEWAY',
-        status: 'PAID',
-        transaction_ref: orderRef,
-      };
-
-      if (defaultBankId) {
-        paymentData.bank_account_id = defaultBankId;
-      }
-
-      const payment = await tx.payment.create({ data: paymentData });
-      newPaymentId = payment.id;
-
-      // 2. Update Invoice status & amount_paid
-      const newAmountPaid = Number(invoice.amount_paid) + payAmount;
-      const isFullyPaid = newAmountPaid >= Number(invoice.total_amount);
-
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: {
-          amount_paid: newAmountPaid,
-          status: isFullyPaid ? 'PAID' : 'PARTIALLY_PAID',
-        },
-      });
-
-      // 3. Create Receipt if model exists
-      if (tx.paymentReceipt) {
-        try {
-          const receiptNum = `REC-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}-${Math.floor(1000 + Math.random() * 9000)}`;
-          await tx.paymentReceipt.create({
-            data: {
-              workspace_id: workspaceId,
-              payment_id: payment.id,
-              receipt_number: receiptNum,
-            },
-          });
-        } catch (e) {
-          console.warn('PaymentReceipt creation skipped:', e);
-        }
-      }
+        currency: orderResult.currency,
+        idempotency_key: idempotencyKey,
+        gateway_name: gatewayProvider,
+        gateway_order_id: orderResult.orderId,
+        status: 'CREATED',
+        expires_at: expiresAt,
+      },
     });
-
-    // 4. Double-Entry Ledger Posting: Debit Cash (1010), Credit AR (1030)
-    try {
-      await postLedgerEntry({
-        workspace_id: workspaceId,
-        debit_account_code: '1010',
-        credit_account_code: '1030',
-        amount: payAmount,
-        description: `Online Payment Settlement via ${gatewayProvider.toUpperCase()} for Invoice ${invoice.invoice_number}`,
-        reference_id: newPaymentId,
-      });
-    } catch (e) {
-      console.warn('Ledger posting warning:', e);
-    }
-
-    // 5. Audit Log
-    try {
-      await logPaymentAudit({
-        workspaceId,
-        paymentId: newPaymentId,
-        action: 'PAYMENT_CHECKOUT_COMPLETED',
-        newValues: { amount: payAmount, gatewayProvider, orderRef },
-      });
-    } catch (e) {
-      console.warn('Audit log warning:', e);
-    }
 
     return NextResponse.json({
-      message: `Payment of ₹${payAmount} processed successfully via ${gatewayProvider.toUpperCase()}!`,
-      paymentId: newPaymentId,
-      orderRef,
-      amountPaid: payAmount,
-      invoiceStatus: payAmount >= dueAmount ? 'PAID' : 'PARTIALLY_PAID',
+      success: true,
+      message: 'Checkout order initialized successfully',
+      intentId: paymentIntent.id,
+      orderId: orderResult.orderId,
+      keyId: orderResult.keyId,
+      amount: orderResult.amount, // in paise
+      currency: orderResult.currency,
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoice_number,
+      isMock: orderResult.isMock,
+      tenant: {
+        name: `${invoice.tenant.user.first_name} ${invoice.tenant.user.last_name}`,
+        email: invoice.tenant.user.email,
+        phone: invoice.tenant.user.phone,
+      },
     });
   } catch (error: any) {
-    console.error('Checkout Error:', error);
-    return NextResponse.json({ error: error.message || 'Checkout failed' }, { status: 500 });
+    console.error('Payment checkout error:', error);
+    return NextResponse.json({ error: error.message || 'Failed to initialize checkout' }, { status: 500 });
   }
 }

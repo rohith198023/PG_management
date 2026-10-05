@@ -9,8 +9,13 @@
     "lint": "next lint",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
-    "db:seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
+    "db:seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts",
+    "test:verify": "node scripts/verify_production_readiness.js",
+    "test:e2e": "node scripts/e2e_full_lifecycle.js",
+    "test": "node scripts/verify_production_readiness.js && node scripts/e2e_full_lifecycle.js"
   },
+
+
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
     "@prisma/client": "^5.18.0",
